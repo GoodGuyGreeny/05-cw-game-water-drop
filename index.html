@@ -3,23 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Water Drop Game</title>
+    <title>Water Drop Catch - Charity: Water Game</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="game-wrapper">
-        <h1 class="game-title">Water Drop</h1>
-        <p class="game-tagline">Catch the good drops, avoid the bad ones!</p>
-        <div class="score-panel">
-            <div class="score">Score: <span id="score">0</span></div>
-            <div class="timer">Time: <span id="time">30</span>s</div>
-            <button id="start-btn">Start Game</button>
+    <div class="page-wrapper">
+        <!-- HERO HEADER - FULL WIDTH -->
+        <header class="hero-header">
+            <div class="hero-content">
+                <img src="img/cw_logo.png" alt="charity: water" class="cw-logo">
+                <h1 class="hero-title">💧 Water Drop Catch</h1>
+                <p class="hero-subtitle">Help bring clean water to communities in need</p>
+            </div>
+        </header>
+
+        <!-- MAIN CONTENT -->
+        <main class="main-content">
+            <div class="container">
+                <!-- HOW TO PLAY CARD -->
+                <section class="how-to-play">
+                    <h2 class="section-title">How to Play</h2>
+                    <div class="rules-grid">
+                        <div class="rule-item">
+                            <span class="rule-icon clean">💧</span>
+                            <p><strong>Blue Drops</strong> = <span class="points-gain">+1 point</span></p>
+                        </div>
+                        <div class="rule-item">
+                            <span class="rule-icon dirty">🟤</span>
+                            <p><strong>Brown Drops</strong> = <span class="points-loss">-2 points</span></p>
+                        </div>
+                        <div class="rule-item trophy">
+                            <span class="rule-icon">🏆</span>
+                            <p><strong>Win Goal:</strong> Reach 20 points before time runs out!</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- GAME BOARD SECTION -->
+                <section class="game-board-section">
+                    <!-- GAME HUD -->
+                    <div class="game-hud">
+                        <div class="hud-item">
+                            <span class="hud-label">Score</span>
+                            <span class="hud-value" id="score">0</span>
+                        </div>
+                        <div class="hud-divider"></div>
+                        <div class="hud-item">
+                            <span class="hud-label">Time</span>
+                            <span class="hud-value" id="time">30</span><span class="hud-unit">s</span>
+                        </div>
+                    </div>
+
+                    <!-- GAME AREA -->
+                    <div id="game-container" class="game-area">
+                        <div id="message-display" class="message-display"></div>
+                    </div>
+
+                    <!-- CONTROLS -->
+                    <div class="button-group">
+                        <button id="start-btn" class="btn btn-primary btn-large">
+                            <span class="btn-text">Start Game</span>
+                        </button>
+                        <button id="reset-btn" class="btn btn-secondary">Reset Game</button>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <!-- WIN OVERLAY -->
+        <div id="win-overlay" class="overlay win-overlay hidden">
+            <div class="overlay-content win-content">
+                <div class="celebration-icon">🎉</div>
+                <h2>You Won!</h2>
+                <p class="win-message">You helped bring clean water to a community in need!</p>
+                <button id="play-again-btn" class="btn btn-primary btn-large">Play Again</button>
+            </div>
         </div>
-        
-        <div id="game-container">
+
+        <!-- GAME OVER OVERLAY -->
+        <div id="game-over-overlay" class="overlay game-over-overlay hidden">
+            <div class="overlay-content game-over-content">
+                <h2>Time's Up!</h2>
+                <p class="final-score-label">Final Score:</p>
+                <p class="final-score-value" id="final-score">0</p>
+                <button id="replay-btn" class="btn btn-primary btn-large">Try Again</button>
+            </div>
         </div>
     </div>
-    
+
+    <canvas id="confetti-canvas"></canvas>
     <script src="script.js"></script>
 </body>
 </html>
