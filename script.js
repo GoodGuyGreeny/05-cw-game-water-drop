@@ -1,307 +1,509 @@
 // =============================================
-// GAME STATE VARIABLES
+// GAME STATE MANAGEMENT
 // =============================================
 
-let gameRunning = false; // Keeps track of whether game is active or not
-let score = 0; // Current player score
-let timeRemaining = 30; // Game countdown timer
-let dropMaker; // Will store our timer that creates drops regularly
-let gameTimer; // Will store our countdown timer
-const GAME_DURATION = 30; // Total game time in seconds
-const WIN_SCORE = 20; // Score needed to win
-const CLEAN_DROP_VALUE = 1; // Points for clean water
-const DIRTY_DROP_VALUE = 2; // Points lost for dirty water
-const DROP_SPAWN_RATE = 800; // Milliseconds between drops
+let gameState = {
+  currentScreen: 'start', // 'start', 'game', 'paused', 'win', 'game-over'
+  difficulty: 'normal', // 'easy', 'normal', 'hard'
+  score: 0,
+  timeRemaining: 45,
+  targetScore: 20,
+  gameRunning: false,
+  dropMaker: null,
+  gameTimer: null,
+  milestones: [
+    { score: 5, message: "Great start!", shown: false },
+    { score: 10, message: "Nice work!", shown: false },
+    { score: 15, message: "Halfway there!", shown: false },
+    { score: 18, message: "Almost there!", shown: false },
+    { score: 20, message: "You did it!", shown: false }
+  ]
+};
 
-// Get DOM elements
-const startBtn = document.getElementById("start-btn");
-const resetBtn = document.getElementById("reset-btn");
-const gameContainer = document.getElementById("game-container");
-const scoreDisplay = document.getElementById("score");
-const timeDisplay = document.getElementById("time");
-const messageDisplay = document.getElementById("message-display");
-const winOverlay = document.getElementById("win-overlay");
-const gameOverOverlay = document.getElementById("game-over-overlay");
-const confettiCanvas = document.getElementById("confetti-canvas");
+// Difficulty configurations
+const DIFFICULTIES = {
+  easy: {
+    timeLimit: 60,
+    targetScore: 15,
+    spawnRate: 1200, // milliseconds
+    dropSpeed: 1.2,
+    name: 'Easy'
+  },
+  normal: {
+    timeLimit: 45,
+    targetScore: 20,
+    spawnRate: 900,
+    dropSpeed: 1.0,
+    name: 'Normal'
+  },
+  hard: {
+    timeLimit: 30,
+    targetScore: 25,
+    spawnRate: 600,
+    dropSpeed: 0.8,
+    name: 'Hard'
+  }
+};
+
+// =============================================
+// AUDIO SYSTEM
+// =============================================
+
+let audioContext;
+let sounds = {};
+
+function initAudio() {
+  try {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+    // Create simple sound generators
+    sounds.collect = createTone(800, 0.1, 'sine');
+    sounds.miss = createTone(200, 0.2, 'sawtooth');
+    sounds.win = createChord([523, 659, 784], 0.5);
+    sounds.lose = createTone(150, 0.8, 'sawtooth');
+    sounds.milestone = createTone(1000, 0.15, 'sine');
+  } catch (e) {
+    console.log('Audio not supported');
+  }
+}
+
+function createTone(frequency, duration, type = 'sine') {
+  return { frequency, duration, type };
+}
+
+function createChord(frequencies, duration) {
+  return { frequencies, duration, type: 'chord' };
+}
+
+function playSound(soundName) {
+  if (!audioContext || !sounds[soundName]) return;
+
+  try {
+    if (soundName === 'win') {
+      // Play chord for win
+      sounds[soundName].frequencies.forEach((freq, index) => {
+        setTimeout(() => playTone(freq, sounds[soundName].duration, 'sine'), index * 100);
+      });
+    } else if (soundName === 'lose') {
+      // Play descending tones for lose
+      [300, 250, 200, 150].forEach((freq, index) => {
+        setTimeout(() => playTone(freq, 0.15, 'sawtooth'), index * 150);
+      });
+    } else {
+      // Play single tone
+      const sound = sounds[soundName];
+      playTone(sound.frequency, sound.duration, sound.type);
+    }
+  } catch (e) {
+    console.log('Error playing sound:', e);
+  }
+}
+
+function playTone(frequency, duration, type) {
+  const oscillator = audioContext.createOscillator();
+  const gainNode = audioContext.createGain();
+
+  oscillator.connect(gainNode);
+  gainNode.connect(audioContext.destination);
+
+  oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+  oscillator.type = type;
+
+  gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+
+  oscillator.start(audioContext.currentTime);
+  oscillator.stop(audioContext.currentTime + duration);
+}
+
+// =============================================
+// DOM ELEMENTS
+// =============================================
+
+const startScreen = document.getElementById('start-screen');
+const gameScreen = document.getElementById('game-screen');
+const pauseOverlay = document.getElementById('pause-overlay');
+const winOverlay = document.getElementById('win-overlay');
+const gameOverOverlay = document.getElementById('game-over-overlay');
+
+const startGameBtn = document.getElementById('start-game-btn');
+const pauseBtn = document.getElementById('pause-btn');
+const resumeBtn = document.getElementById('resume-btn');
+const restartBtn = document.getElementById('restart-btn');
+const quitBtn = document.getElementById('quit-btn');
+const quitToMenuBtn = document.getElementById('quit-to-menu-btn');
+const playAgainWinBtn = document.getElementById('play-again-win-btn');
+const menuWinBtn = document.getElementById('menu-win-btn');
+const replayBtn = document.getElementById('replay-btn');
+const menuGameOverBtn = document.getElementById('menu-game-over-btn');
+
+const gameContainer = document.getElementById('game-container');
+const scoreDisplay = document.getElementById('score');
+const timeDisplay = document.getElementById('time');
+const targetScoreDisplay = document.getElementById('target-score');
+const messageDisplay = document.getElementById('message-display');
+const finalScoreWin = document.getElementById('final-score-win');
+const timeLeftWin = document.getElementById('time-left-win');
+const finalScoreGameOver = document.getElementById('final-score');
+const targetMessage = document.getElementById('target-message');
+
+const difficultyBtns = document.querySelectorAll('.difficulty-btn');
 
 // =============================================
 // EVENT LISTENERS
 // =============================================
 
-// Wait for button clicks to control game
-startBtn.addEventListener("click", startGame);
-resetBtn.addEventListener("click", resetGame);
+startGameBtn.addEventListener('click', () => startGame());
+pauseBtn.addEventListener('click', () => setGameState('paused'));
+resumeBtn.addEventListener('click', () => resumeGame());
+restartBtn.addEventListener('click', () => restartGame());
+quitBtn.addEventListener('click', () => quitToMenu());
+quitToMenuBtn.addEventListener('click', () => quitToMenu());
+playAgainWinBtn.addEventListener('click', () => restartGame());
+menuWinBtn.addEventListener('click', () => quitToMenu());
+replayBtn.addEventListener('click', () => restartGame());
+menuGameOverBtn.addEventListener('click', () => quitToMenu());
+
+// Difficulty selection
+difficultyBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    difficultyBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    gameState.difficulty = btn.dataset.difficulty;
+  });
+});
 
 // =============================================
-// MAIN GAME FUNCTIONS
+// GAME STATE MANAGEMENT
 // =============================================
 
-/**
- * Starts the game - initializes timers and drop spawning
- */
+function setGameState(newState) {
+  gameState.currentScreen = newState;
+
+  // Hide all screens
+  startScreen.classList.add('hidden');
+  gameScreen.classList.add('hidden');
+  pauseOverlay.classList.add('hidden');
+  winOverlay.classList.add('hidden');
+  gameOverOverlay.classList.add('hidden');
+
+  // Show current screen
+  switch (newState) {
+    case 'start':
+      startScreen.classList.remove('hidden');
+      break;
+    case 'game':
+      gameScreen.classList.remove('hidden');
+      break;
+    case 'paused':
+      gameScreen.classList.remove('hidden');
+      pauseOverlay.classList.remove('hidden');
+      break;
+    case 'win':
+      gameScreen.classList.remove('hidden');
+      winOverlay.classList.remove('hidden');
+      break;
+    case 'game-over':
+      gameScreen.classList.remove('hidden');
+      gameOverOverlay.classList.remove('hidden');
+      break;
+  }
+}
+
+// =============================================
+// GAME FUNCTIONS
+// =============================================
+
 function startGame() {
-  // Prevent multiple games from running at once
-  if (gameRunning) return;
+  const difficulty = DIFFICULTIES[gameState.difficulty];
 
-  gameRunning = true;
-  score = 0;
-  timeRemaining = GAME_DURATION;
+  // Initialize game state
+  gameState.score = 0;
+  gameState.timeRemaining = difficulty.timeLimit;
+  gameState.targetScore = difficulty.targetScore;
+  gameState.gameRunning = true;
+
+  // Reset milestones
+  gameState.milestones.forEach(milestone => milestone.shown = false);
 
   // Update displays
   updateScore(0);
   updateTimer();
-  startBtn.disabled = true;
-  resetBtn.disabled = true;
+  updateTargetScore();
 
   // Clear any existing drops
-  const existingDrops = document.querySelectorAll(".water-drop");
-  existingDrops.forEach(drop => drop.remove());
+  clearDrops();
 
-  // Hide overlays
-  winOverlay.classList.add("hidden");
-  gameOverOverlay.classList.add("hidden");
-
-  // Create new drops every spawn rate milliseconds
-  dropMaker = setInterval(createDrop, DROP_SPAWN_RATE);
+  // Start spawning drops
+  gameState.dropMaker = setInterval(createDrop, difficulty.spawnRate);
 
   // Start countdown timer
-  gameTimer = setInterval(countdown, 1000);
+  gameState.gameTimer = setInterval(countdown, 1000);
+
+  // Change to game screen
+  setGameState('game');
+
+  // Initialize audio on first interaction
+  if (!audioContext) {
+    initAudio();
+  }
 }
 
-/**
- * Creates a new water drop at a random position
- * Randomly determines if it's a clean (blue) or dirty (brown) drop
- */
-function createDrop() {
-  // Create a new div element that will be our water drop
-  const drop = document.createElement("div");
-  drop.className = "water-drop";
+function resumeGame() {
+  gameState.gameRunning = true;
+  setGameState('game');
+}
 
-  // Randomly decide if it's a clean or dirty drop (70% clean, 30% dirty)
+function restartGame() {
+  // Stop current game
+  stopGame();
+
+  // Start new game
+  startGame();
+}
+
+function quitToMenu() {
+  stopGame();
+  setGameState('start');
+}
+
+function stopGame() {
+  gameState.gameRunning = false;
+  if (gameState.dropMaker) {
+    clearInterval(gameState.dropMaker);
+    gameState.dropMaker = null;
+  }
+  if (gameState.gameTimer) {
+    clearInterval(gameState.gameTimer);
+    gameState.gameTimer = null;
+  }
+  clearDrops();
+}
+
+function clearDrops() {
+  const drops = document.querySelectorAll('.water-drop');
+  drops.forEach(drop => drop.remove());
+}
+
+// =============================================
+// DROP MANAGEMENT
+// =============================================
+
+function createDrop() {
+  if (!gameState.gameRunning) return;
+
+  const drop = document.createElement('div');
+  drop.className = 'water-drop';
+
+  // Randomly decide if it's clean or dirty (70% clean, 30% dirty)
   const isClean = Math.random() < 0.7;
   if (isClean) {
-    drop.classList.add("clean-drop");
+    drop.classList.add('clean-drop');
   } else {
-    drop.classList.add("bad-drop");
+    drop.classList.add('bad-drop');
   }
 
-  // Make drops different sizes for visual variety
-  const initialSize = 60;
+  // Random size for visual variety
+  const baseSize = 60;
   const sizeMultiplier = Math.random() * 0.8 + 0.5;
-  const size = initialSize * sizeMultiplier;
+  const size = baseSize * sizeMultiplier;
   drop.style.width = drop.style.height = `${size}px`;
 
-  // Position the drop randomly across the game width
+  // Position randomly
   const gameWidth = gameContainer.offsetWidth;
   const xPosition = Math.random() * (gameWidth - size);
-  drop.style.left = xPosition + "px";
+  drop.style.left = xPosition + 'px';
 
-  // Make drops fall based on game container height
+  // Calculate fall duration based on difficulty
+  const difficulty = DIFFICULTIES[gameState.difficulty];
   const gameHeight = gameContainer.offsetHeight;
-  const fallDuration = (gameHeight / 100) * 3; // Adjust speed based on container size
-  drop.style.animationDuration = fallDuration + "s";
+  const baseDuration = (gameHeight / 100) * 3; // Base speed
+  const fallDuration = baseDuration * difficulty.dropSpeed;
+  drop.style.animationDuration = fallDuration + 's';
 
-  // Add the new drop to the game screen
+  // Add to game area
   gameContainer.appendChild(drop);
 
-  // Add click event listener to the drop
-  drop.addEventListener("click", (e) => handleDropClick(e, drop, isClean));
+  // Add click handler
+  drop.addEventListener('click', (e) => handleDropClick(e, drop, isClean));
 
-  // Remove drops that reach the bottom (weren't clicked)
-  drop.addEventListener("animationend", () => {
+  // Remove drop when animation ends (missed drop)
+  drop.addEventListener('animationend', () => {
     if (drop.parentElement) {
-      drop.remove(); // Clean up drops that weren't caught
+      drop.remove();
+      if (gameState.gameRunning) {
+        handleMissedDrop();
+      }
     }
   });
 }
 
-/**
- * Handles when a drop is clicked
- * Updates score and shows feedback message
- */
 function handleDropClick(event, drop, isClean) {
-  // Prevent default behavior
   event.stopPropagation();
 
+  // Create score popup at click position
+  createScorePopup(event.clientX, event.clientY, isClean ? '+1' : '-2', isClean);
+
   // Add clicked animation
-  drop.classList.add("clicked");
+  drop.classList.add('clicked');
 
   // Update score and show message
+  let points;
+  let message;
   if (isClean) {
-    updateScore(CLEAN_DROP_VALUE);
-    showMessage(`+${CLEAN_DROP_VALUE} Clean Water!`, "positive");
+    points = 1;
+    message = `+${points} Clean Water!`;
+    playSound('collect');
   } else {
-    updateScore(-DIRTY_DROP_VALUE);
-    showMessage(`-${DIRTY_DROP_VALUE} Dirty Water!`, "negative");
+    points = -2;
+    message = `-${Math.abs(points)} Dirty Water!`;
+    playSound('miss');
   }
 
-  // Remove the drop after animation
+  updateScore(points);
+  showMessage(message, isClean ? 'positive' : 'negative');
+
+  // Check milestones
+  checkMilestones();
+
+  // Check win condition
+  if (gameState.score >= gameState.targetScore && gameState.gameRunning) {
+    endGameWin();
+  }
+
+  // Remove drop after animation
   setTimeout(() => {
     if (drop.parentElement) {
       drop.remove();
     }
   }, 600);
+}
 
-  // Check for win condition
-  if (score >= WIN_SCORE && gameRunning) {
-    endGameWin();
+function handleMissedDrop() {
+  // Only penalize if it's a clean drop that was missed
+  // Brown drops are already penalties when clicked
+  playSound('miss');
+  showMessage('Missed!', 'negative');
+}
+
+function createScorePopup(x, y, text, isPositive) {
+  const popup = document.createElement('div');
+  popup.className = 'score-popup';
+  popup.textContent = text;
+
+  if (isPositive) {
+    popup.classList.add('score-popup-positive');
+  } else {
+    popup.classList.add('score-popup-negative');
   }
+
+  // Position at click location
+  popup.style.left = x + 'px';
+  popup.style.top = y + 'px';
+
+  document.body.appendChild(popup);
+
+  // Remove after animation
+  setTimeout(() => {
+    if (popup.parentElement) {
+      popup.remove();
+    }
+  }, 1000);
 }
 
-/**
- * Updates the score display and game state
- */
+// =============================================
+// UI UPDATES
+// =============================================
+
 function updateScore(points) {
-  score += points;
-  // Ensure score doesn't go below 0
-  if (score < 0) score = 0;
-  scoreDisplay.textContent = score;
+  gameState.score += points;
+  if (gameState.score < 0) gameState.score = 0;
+  scoreDisplay.textContent = gameState.score;
 }
 
-/**
- * Shows a temporary feedback message to the player
- */
+function updateTimer() {
+  timeDisplay.textContent = gameState.timeRemaining;
+}
+
+function updateTargetScore() {
+  targetScoreDisplay.textContent = gameState.targetScore;
+}
+
 function showMessage(text, type) {
   messageDisplay.textContent = text;
-  messageDisplay.classList.remove("show-positive", "show-negative");
+  messageDisplay.classList.remove('show-positive', 'show-negative');
 
   // Trigger reflow to restart animation
   void messageDisplay.offsetWidth;
 
-  if (type === "positive") {
-    messageDisplay.classList.add("show-positive");
-  } else if (type === "negative") {
-    messageDisplay.classList.add("show-negative");
+  if (type === 'positive') {
+    messageDisplay.classList.add('show-positive');
+  } else if (type === 'negative') {
+    messageDisplay.classList.add('show-negative');
   }
 }
 
-/**
- * Starts the countdown timer for the game
- */
+function checkMilestones() {
+  gameState.milestones.forEach(milestone => {
+    if (!milestone.shown && gameState.score >= milestone.score) {
+      milestone.shown = true;
+      showMessage(milestone.message, 'positive');
+      playSound('milestone');
+    }
+  });
+}
+
+// =============================================
+// GAME END HANDLERS
+// =============================================
+
 function countdown() {
-  timeRemaining--;
+  gameState.timeRemaining--;
   updateTimer();
 
-  // End game when time runs out
-  if (timeRemaining <= 0) {
+  if (gameState.timeRemaining <= 0) {
     endGameTimeout();
   }
 }
 
-/**
- * Updates the timer display
- */
-function updateTimer() {
-  timeDisplay.textContent = timeRemaining;
-}
-
-/**
- * Ends the game when player reaches win score
- */
 function endGameWin() {
-  gameRunning = false;
-  clearInterval(dropMaker);
-  clearInterval(gameTimer);
-  startBtn.disabled = false;
-  resetBtn.disabled = false;
+  stopGame();
+  playSound('win');
 
-  // Remove all drops from screen
-  const drops = document.querySelectorAll(".water-drop");
-  drops.forEach(drop => drop.remove());
+  // Update win overlay
+  finalScoreWin.textContent = gameState.score;
+  timeLeftWin.textContent = gameState.timeRemaining;
 
-  // Show win overlay
-  winOverlay.classList.remove("hidden");
+  // Show win screen
+  setGameState('win');
 
-  // Trigger confetti celebration
+  // Trigger confetti
   triggerConfetti();
-
-  // Setup play again button
-  const playAgainBtn = document.getElementById("play-again-btn");
-  playAgainBtn.addEventListener("click", resetGame);
 }
 
-/**
- * Ends the game when time runs out
- */
 function endGameTimeout() {
-  gameRunning = false;
-  clearInterval(dropMaker);
-  clearInterval(gameTimer);
-  startBtn.disabled = false;
-  resetBtn.disabled = false;
+  stopGame();
+  playSound('lose');
 
-  // Remove all drops from screen
-  const drops = document.querySelectorAll(".water-drop");
-  drops.forEach(drop => drop.remove());
+  // Update game over overlay
+  finalScoreGameOver.textContent = gameState.score;
+  targetMessage.textContent = `Target was ${gameState.targetScore} points`;
 
-  // Show game over overlay
-  document.getElementById("final-score").textContent = score;
-  gameOverOverlay.classList.remove("hidden");
-
-  // Setup replay button
-  const replayBtn = document.getElementById("replay-btn");
-  replayBtn.addEventListener("click", resetGame);
-}
-
-/**
- * Resets the game to initial state
- */
-function resetGame() {
-  // Stop the game if running
-  if (gameRunning) {
-    gameRunning = false;
-    clearInterval(dropMaker);
-    clearInterval(gameTimer);
-  }
-
-  // Reset variables
-  score = 0;
-  timeRemaining = GAME_DURATION;
-
-  // Update displays
-  scoreDisplay.textContent = "0";
-  timeDisplay.textContent = "30";
-  messageDisplay.textContent = "";
-  messageDisplay.classList.remove("show-positive", "show-negative");
-
-  // Hide overlays
-  winOverlay.classList.add("hidden");
-  gameOverOverlay.classList.add("hidden");
-
-  // Remove all drops
-  const drops = document.querySelectorAll(".water-drop");
-  drops.forEach(drop => drop.remove());
-
-  // Enable buttons
-  startBtn.disabled = false;
-  resetBtn.disabled = false;
-
-  // Clear any animation event listeners
-  const allDivs = gameContainer.querySelectorAll("div");
-  allDivs.forEach(div => {
-    if (div !== messageDisplay) {
-      div.remove();
-    }
-  });
+  // Show game over screen
+  setGameState('game-over');
 }
 
 // =============================================
 // CONFETTI ANIMATION
 // =============================================
 
-/**
- * Triggers a confetti celebration using canvas
- * Creates falling confetti particles
- */
 function triggerConfetti() {
-  const canvas = confettiCanvas;
-  const ctx = canvas.getContext("2d");
+  const canvas = document.getElementById('confetti-canvas');
+  const ctx = canvas.getContext('2d');
 
-  // Set canvas size to window size
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  // Create confetti particles
   const particles = [];
   const particleCount = 100;
 
@@ -318,22 +520,17 @@ function triggerConfetti() {
     });
   }
 
-  // Animation function
   function animate() {
-    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Update and draw particles
     let activeParticles = 0;
 
     particles.forEach((particle) => {
-      // Update position
       particle.x += particle.vx;
       particle.y += particle.vy;
-      particle.vy += 0.2; // Gravity
+      particle.vy += 0.2;
       particle.rotation += particle.rotationSpeed;
 
-      // Draw particle
       if (particle.y < canvas.height) {
         ctx.save();
         ctx.translate(particle.x, particle.y);
@@ -345,11 +542,9 @@ function triggerConfetti() {
       }
     });
 
-    // Continue animation if there are active particles
     if (activeParticles > 0) {
       requestAnimationFrame(animate);
     } else {
-      // Clear canvas when done
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
   }
@@ -357,19 +552,10 @@ function triggerConfetti() {
   animate();
 }
 
-/**
- * Returns a random charity: water brand color for confetti
- */
 function getRandomColor() {
   const colors = [
-    "#FFC907", // Yellow
-    "#2E9DF7", // Blue
-    "#8BD1CB", // Light Blue
-    "#4FCB53", // Green
-    "#FF902A", // Orange
-    "#F5402C", // Red
-    "#159A48", // Dark Green
-    "#F16061", // Pink
+    '#FFC907', '#2E9DF7', '#8BD1CB', '#4FCB53', '#FF902A',
+    '#F5402C', '#159A48', '#F16061'
   ];
   return colors[Math.floor(Math.random() * colors.length)];
 }
@@ -378,11 +564,26 @@ function getRandomColor() {
 // RESPONSIVE ADJUSTMENTS
 // =============================================
 
-/**
- * Handle window resize for responsive design
- */
-window.addEventListener("resize", () => {
-  const canvas = confettiCanvas;
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+window.addEventListener('resize', () => {
+  const canvas = document.getElementById('confetti-canvas');
+  if (canvas) {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+});
+
+// =============================================
+// INITIALIZATION
+// =============================================
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Set initial screen
+  setGameState('start');
+
+  // Initialize audio on first user interaction
+  document.addEventListener('click', () => {
+    if (!audioContext) {
+      initAudio();
+    }
+  }, { once: true });
 });
